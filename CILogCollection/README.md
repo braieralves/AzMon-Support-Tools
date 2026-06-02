@@ -58,8 +58,8 @@ bash CILogCollection.sh --ampls --skip-network
 
 Collects logs from all `ama-logs` agent pods in the `kube-system` namespace:
 
-- **DaemonSet pods** (`ama-logs-*`): `mdsd.err`, `mdsd.qos`, `mdsd.info`, `fluent-bit-out-oms-runtime.log`, `fluent-bit*.log`, container inventory file, and process list
-- **ReplicaSet pod** (`ama-logs-rs-*`): same set of runtime logs plus RS-specific configuration
+- **DaemonSet pods** (`ama-logs-*`): `mdsd.err`, `mdsd.qos`, `mdsd.info`, `fluent-bit-out-oms-runtime.log`, `fluent-bit*.log`, container inventory file, process list, full `/etc/mdsd.d/` config directory, agent state directory, and custom prometheus settings
+- **ReplicaSet pod** (`ama-logs-rs-*`): same set of runtime logs plus RS-specific configuration and full `/etc/mdsd.d/` config directory
 - **Windows DaemonSet pods** (`ama-logs-windows-*`): Windows agent event logs and config
 - **Cluster resources**: pod descriptions (`kubectl describe`), ConfigMaps, DCR/DCRA objects, and Kubernetes events for `ama-logs`
 
@@ -116,24 +116,57 @@ All files are written to a timestamped directory and then compressed into a `.ta
 CILogs_<timestamp>/
 ├── Tool.log                          # Script execution log
 ├── analysis_log.txt                  # Full analysis findings
-├── nodes.txt                         # kubectl get nodes output
-├── pods.txt                          # kubectl get pods -n kube-system output
-├── ama-logs-daemonset-<pod>/
-│   ├── mdsd.err
-│   ├── mdsd.qos
-│   ├── mdsd.info
+├── network-connectivity.log
+├── azure-config-check.log
+├── cluster/
+│   ├── node.txt
+│   ├── node-detailed.json
+│   ├── daemonset-status.txt
+│   ├── pod-status.txt
+│   ├── ama-logs-events.txt
+│   ├── agent-version.txt
+│   ├── top-nodes.txt
+│   ├── top-pods-kube-system.txt
+│   ├── deployment_<name>.yaml
+│   ├── container-azm-ms-agentconfig.yaml
+│   ├── container-azm-ms-aks-k8scluster.yaml
+│   ├── ama-logs-rs-config.yaml
+│   ├── network-policies.yaml
+│   └── serviceaccount-ama-logs.yaml
+├── ama-logs-daemonset/
+│   ├── describe_<pod>.txt
+│   ├── logs_<pod>.txt
+│   ├── logs_<pod>_previous.txt
+│   ├── process_<pod>.txt
+│   ├── containerID_<pod>.txt
 │   ├── fluent-bit-out-oms-runtime.log
 │   ├── fluent-bit*.log
-│   ├── containerID_<pod>.txt
-│   └── process_<pod>.txt
-├── ama-logs-replicaset-<pod>/
-│   └── (same structure)
-├── ama-logs-windows-<pod>/
-│   └── (Windows-specific logs)
-├── describe_<pod>.txt                # kubectl describe output per pod
-├── configmaps.txt
-├── dcr.txt / dcra.txt
-└── events_ama_logs.txt
+│   ├── container_<pod>.conf
+│   ├── fluent-bit.conf
+│   ├── telegraf.conf
+│   └── settings/
+├── ama-logs-daemonset-mdsd/          # mdsd logs (err, qos, info, warn)
+├── ama-logs-daemonset-dcr/           # DCR configchunks (.json)
+├── ama-logs-daemonset-mdsd-config/   # /etc/mdsd.d/ — mdsd.xml and full config
+├── ama-logs-prom-daemonset/
+│   └── logs_<pod>_prom.txt
+├── ama-logs-replicaset/
+│   ├── describe_<pod>.txt
+│   ├── logs_<pod>.txt
+│   ├── logs_<pod>_previous.txt
+│   ├── process_<pod>.txt
+│   ├── kube_<pod>.conf
+│   ├── fluent-bit-rs.conf
+│   └── telegraf-rs.conf
+├── ama-logs-replicaset-mdsd/
+├── ama-logs-replicaset-dcr/
+├── ama-logs-replicaset-mdsd-config/
+├── ama-logs-windows-daemonset/
+│   ├── describe_<pod>.txt
+│   ├── logs_<pod>.txt
+│   ├── process_<pod>.txt
+│   └── <windows-log-files>.txt
+└── ama-logs-windows-daemonset-fbit/
 ```
 
 The final archive is named `CILogs_<timestamp>.tar.gz` in the directory where the script was run.
