@@ -71,8 +71,9 @@ Tests DNS resolution and HTTPS reachability for all required Azure Monitor endpo
 |---|---|
 | Global ODS / OMS / agent service | Always |
 | Workspace-specific ODS / OMS | `--workspace-id` provided or auto-detected |
-| Regional control plane | `--region` provided or auto-detected |
-| Private link (AMPLS) overrides | AMPLS detected or `--ampls` passed |
+| Regional control plane | `--region` provided or auto-detected; **skipped in AMPLS mode** (Azure only creates a private DNS zone for the global handler endpoint, not the regional one) |
+
+> **AMPLS note:** In AMPLS mode the script always tests the standard `{workspace-id}.ods/oms.opinsights.azure.com` hostnames — not the `.privatelink.` form. The private DNS zones override resolution of the standard hostnames to private IPs, which the DNS test validates. The `.privatelink.` hostnames cause TLS failures because the certificate is issued for `*.ods.opinsights.azure.com`.
 
 ### Phase 3 — Log Analysis
 
@@ -89,6 +90,7 @@ Files analyzed:
 | File | Checks |
 |---|---|
 | `mdsd.err` | Fatal errors, certificate failures, throttling, config parse errors |
+| `mdsd.warn` | Unexpected warnings (benign container-environment systemctl noise is filtered before evaluation) |
 | `mdsd.qos` | Data throughput per stream — confirms rows are reaching Azure Monitor |
 | `fluent-bit-out-oms-runtime.log` | Continuous output errors (5+ occurrences in recent log) |
 | `fluent-bit*.log` | Pipeline errors and back-pressure events |
@@ -102,9 +104,11 @@ When `--cluster-resource-id` is provided, the script uses `az` CLI to check:
 
 - Container Insights add-on status (enabled / disabled)
 - Authentication mode (Managed Identity vs. Legacy)
-- Data Collection Rule (DCR) and association (DCRA) existence and linkage
+- Data Collection Rule (DCR) and association (DCRA) existence and linkage, including the Data Collection Endpoint (DCE) referenced by the DCR (if any)
 - Daily ingestion cap — alerts if within 20% of the cap or if cap is hit
 - Table-level data activity (last record received per table)
+- **AMPLS mode only:** whether the Log Analytics workspace is a connected resource in the AMPLS private link scope
+- **AMPLS mode only:** whether a DCE is associated with the cluster (via the DCR or a direct DCRA) and is a connected resource in the AMPLS scope — required for configuration delivery over the private link
 
 ---
 
@@ -115,7 +119,7 @@ All files are written to a timestamped directory and then compressed into a `.ta
 ```
 CILogs_<timestamp>/
 ├── Tool.log                          # Script execution log
-├── analysis_log.txt                  # Full analysis findings
+├── analysis-findings.log             # Full analysis findings
 ├── network-connectivity.log
 ├── azure-config-check.log
 ├── cluster/
@@ -192,6 +196,8 @@ The script only reads from the cluster — no writes, no deletions.
 |---|---|
 | AKS cluster resource | `Reader` |
 | Log Analytics workspace | `Log Analytics Reader` |
+| AMPLS scope (if `--ampls` or auto-detected) | `Reader` on the private link scope resource |
+| Data Collection Endpoint (if DCE is configured) | `Reader` |
 
 ---
 
