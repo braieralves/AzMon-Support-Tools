@@ -1,6 +1,6 @@
 # CILogCollection.sh
 
-A diagnostic shell script for [Azure Monitor Container Insights](https://learn.microsoft.com/azure/azure-monitor/containers/container-insights-overview) on AKS and Arc-enabled Kubernetes clusters. It collects logs from `ama-logs` agent pods, tests network connectivity to Azure Monitor endpoints, and analyzes the collected logs for common known issues — all in a single run.
+A diagnostic shell script for [Azure Monitor Container Insights](https://learn.microsoft.com/azure/azure-monitor/containers/container-insights-overview) on AKS and Arc-enabled Kubernetes clusters. It collects logs from `ama-logs` agent pods, tests network connectivity to Azure Monitor endpoints, and analyzes the collected logs for common known issues - all in a single run.
 
 ---
 
@@ -54,7 +54,7 @@ bash CILogCollection.sh --ampls --skip-network
 
 ## What it does
 
-### Phase 1 — Log Collection
+### Phase 1 - Log Collection
 
 Collects logs from all `ama-logs` agent pods in the `kube-system` namespace:
 
@@ -63,7 +63,7 @@ Collects logs from all `ama-logs` agent pods in the `kube-system` namespace:
 - **Windows DaemonSet pods** (`ama-logs-windows-*`): Windows agent event logs and config
 - **Cluster resources**: pod descriptions (`kubectl describe`), ConfigMaps, DCR/DCRA objects, and Kubernetes events for `ama-logs`
 
-### Phase 2 — Network Connectivity
+### Phase 2 - Network Connectivity
 
 Tests DNS resolution and HTTPS reachability for all required Azure Monitor endpoints:
 
@@ -72,11 +72,11 @@ Tests DNS resolution and HTTPS reachability for all required Azure Monitor endpo
 | Global ODS / OMS / agent service | Always |
 | Workspace-specific ODS / OMS | `--workspace-id` provided or auto-detected |
 | Regional control plane | `--region` provided or auto-detected; **skipped in AMPLS mode** (Azure only creates a private DNS zone for the global handler endpoint, not the regional one) |
-| DCE-specific handler endpoint | AMPLS mode only — hostname extracted from `mdsd.info` (`MCS redirected to endpoint` log line) and tested for DNS resolution and HTTPS reachability |
+| DCE-specific handler endpoint | AMPLS mode only - hostname extracted from `mdsd.info` (`MCS redirected to endpoint` log line) and tested for DNS resolution and HTTPS reachability |
 
 > **AMPLS note:** In AMPLS mode the script always tests the standard `{workspace-id}.ods/oms.opinsights.azure.com` hostnames — not the `.privatelink.` form. The private DNS zones override resolution of the standard hostnames to private IPs, which the DNS test validates. The `.privatelink.` hostnames cause TLS failures because the certificate is issued for `*.ods.opinsights.azure.com`.
 
-### Phase 3 — Log Analysis
+### Phase 3 - Log Analysis
 
 Scans the collected logs and reports findings at three severity levels:
 
@@ -92,24 +92,24 @@ Files analyzed:
 |---|---|
 | `mdsd.err` | Fatal errors, certificate failures, throttling, config parse errors |
 | `mdsd.warn` | Unexpected warnings (benign container-environment systemctl noise is filtered before evaluation) |
-| `mdsd.qos` | Data throughput per stream — confirms rows are reaching Azure Monitor |
+| `mdsd.qos` | Data throughput per stream - confirms rows are reaching Azure Monitor |
 | `fluent-bit-out-oms-runtime.log` | Continuous output errors (5+ occurrences in recent log) |
 | `fluent-bit*.log` | Pipeline errors and back-pressure events |
 | `process_*.txt` | Confirms `mdsd`, `td-agent-bit`, and `omsagent` are running |
 | `containerID_*.txt` | Validates container inventory is being tracked |
 | Pod descriptions | OOMKill events and abnormal restart counts |
 
-### Phase 4 — Azure Configuration Check
+### Phase 4 - Azure Configuration Check
 
 When `--cluster-resource-id` is provided, the script uses `az` CLI to check:
 
 - Container Insights add-on status (enabled / disabled)
 - Authentication mode (Managed Identity vs. Legacy)
 - Data Collection Rule (DCR) and association (DCRA) existence and linkage, including the Data Collection Endpoint (DCE) referenced by the DCR (if any)
-- Daily ingestion cap — queries `_LogOperation` for cap-hit events in the last 7 days and lists them if found
+- Daily ingestion cap - queries `_LogOperation` for cap-hit events in the last 7 days and lists them if found
 - Table-level data activity (last record received per table); if all tables stopped at the same timestamp more than 15 minutes ago, emits an additional warning that the simultaneous cutoff is a strong daily cap indicator
 - **AMPLS mode only:** whether the Log Analytics workspace is a connected resource in the AMPLS private link scope
-- **AMPLS mode only:** whether a DCE is associated with the cluster (via the DCR or a direct DCRA) and is a connected resource in the AMPLS scope — required for configuration delivery over the private link; also checks `publicNetworkAccess` on the DCE (`Disabled` = config refresh will fail if DCE is not in scope; `Enabled` = currently working over public internet but will break if public access is later disabled)
+- **AMPLS mode only:** whether a DCE is associated with the cluster (via the DCR or a direct DCRA) and is a connected resource in the AMPLS scope - required for configuration delivery over the private link; also checks `publicNetworkAccess` on the DCE (`Disabled` = config refresh will fail if DCE is not in scope; `Enabled` = currently working over public internet but will break if public access is later disabled)
 
 ---
 
@@ -152,7 +152,7 @@ CILogs_<timestamp>/
 │   └── settings/
 ├── ama-logs-daemonset-mdsd/          # mdsd logs (err, qos, info, warn)
 ├── ama-logs-daemonset-dcr/           # DCR configchunks (.json)
-├── ama-logs-daemonset-mdsd-config/   # /etc/mdsd.d/ — mdsd.xml and full config
+├── ama-logs-daemonset-mdsd-config/   # /etc/mdsd.d/ - mdsd.xml and full config
 ├── ama-logs-prom-daemonset/
 │   └── logs_<pod>_prom.txt
 ├── ama-logs-replicaset/
@@ -182,7 +182,7 @@ The final archive is named `CILogs_<timestamp>.tar.gz` in the directory where th
 
 ### kubectl (read-only)
 
-The script only reads from the cluster — no writes, no deletions.
+The script only reads from the cluster - no writes, no deletions.
 
 | Operation | Required |
 |---|---|
