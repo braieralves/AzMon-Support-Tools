@@ -501,6 +501,17 @@ network_connectivity_check() {
         )
     fi
 
+    # DCE-specific handler endpoint (AMPLS only) — parsed from mdsd.info.
+    # When config is routed through a DCE, mdsd logs the redirect target hostname.
+    local dce_test_endpoint=""
+    if $USE_AMPLS; then
+        dce_test_endpoint=$(grep -oP 'MCS redirected to endpoint https://\K\S+' \
+            "ama-logs-daemonset-mdsd/mdsd.info" 2>/dev/null | head -1)
+        if [[ -n "$dce_test_endpoint" ]]; then
+            endpoints+=("$dce_test_endpoint")
+        fi
+    fi
+
     local net_failures=0
     local dns_failures=0
 
@@ -510,6 +521,10 @@ network_connectivity_check() {
     echo -e "  - *.ods.opinsights.azure.com        : Log data ingestion endpoint" | tee -a "$net_log"
     echo -e "  - *.oms.opinsights.azure.com        : Agent heartbeat and management" | tee -a "$net_log"
     echo -e "  - dc.services.visualstudio.com      : Agent diagnostics / telemetry" | tee -a "$net_log"
+    if [[ -n "$dce_test_endpoint" ]]; then
+        echo -e "  ${Cyan}[INFO] DCE handler endpoint detected from mdsd.info: ${dce_test_endpoint}" | tee -a "$net_log"
+        echo -e "         Testing DNS resolution and HTTPS connectivity for this endpoint.${NC}" | tee -a "$net_log"
+    fi
 
     # ── DNS resolution tests ──────────────────────────────────────────────────
     if [[ -n "$has_nslookup" ]]; then
@@ -671,9 +686,14 @@ analyze_collected_logs() {
             "Run network connectivity tests or check firewall rules for Azure Monitor endpoints. Review the network-connectivity.log in this archive."; then
             found_any=true
         elif scan_log "$mdsd_err" "$mdsd_err" \
+            "Data collection endpoint must be used to access configuration over private link" \
+            "AMPLS private link 403: DCE is not a connected resource in the AMPLS scope." \
+            "Add the DCE as a scoped resource in the AMPLS scope so the agent can fetch its DCR configuration over the private link. Review the azure-config-check.log DCE section."; then
+            found_any=true
+        elif scan_log "$mdsd_err" "$mdsd_err" \
             "403|InvalidAccess|Unauthorized|Authentication failed|forbidden|Access denied" \
             "Authentication/authorization errors (403) detected." \
-            "Verify the cluster managed identity has Monitoring Metrics Publisher role on the Log Analytics Workspace. If AMPLS is in use, check AMPLS scope includes the workspace."; then
+            "If AMPLS is in use, verify the workspace and DCE are connected resources in the AMPLS scope. Check that the cluster managed identity exists and the DCR association is valid."; then
             found_any=true
         elif scan_log "$mdsd_err" "$mdsd_err" \
             "certificate|SSL|TLS|cert verify|x509" \
@@ -977,7 +997,11 @@ print('|'.join([
             echo -e "  Data Collection Endpoint:  ${dce_name:-$dce_id}" | tee -a "$az_log"
             DETECTED_DCE_ID="$dce_id"
         else
-            echo -e "  Data Collection Endpoint:  (none — agent uses default regional endpoint)" | tee -a "$az_log"
+            if $USE_AMPLS; then
+                echo -e "  Data Collection Endpoint:  (not configured in DCR — see DCE AMPLS check below)" | tee -a "$az_log"
+            else
+                echo -e "  Data Collection Endpoint:  (none — agent uses default regional endpoint)" | tee -a "$az_log"
+            fi
         fi
 
         # Populate global WORKSPACE_ID from DCR if not already known
@@ -1029,7 +1053,7 @@ _check_daily_cap() {
     local cap_result
     cap_result=$(az monitor log-analytics query \
         --workspace "$WORKSPACE_ID" \
-        --analytics-query "_LogOperation | where TimeGenerated >= ago(7d) | search 'OverQuota' | summarize count()" \
+        --analytics-query "_LogOperation | where TimeGenerated >= ago(7d) | where Category == 'Ingestion' | where Detail has 'OverQuota' | project TimeGenerated, Category, Detail" \
         -o json 2>/dev/null)
 
     if [[ -z "$cap_result" ]] || [[ "$cap_result" == "null" ]]; then
@@ -1038,30 +1062,45 @@ _check_daily_cap() {
         return
     fi
 
-    local hit_count
-    hit_count=$(echo "$cap_result" | python3 -c "
+    local cap_output
+    cap_output=$(echo "$cap_result" | python3 -c "
 import sys, json
 try:
     data = json.load(sys.stdin)
-    tables = data if isinstance(data, list) else data.get('tables', [])
-    for t in tables:
-        rows = t.get('rows', [])
-        if rows:
-            print(int(rows[0][0]))
-            sys.exit(0)
-    print(0)
-except:
-    print(0)
+    rows = []
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict) and 'TimeGenerated' in item:
+                rows.append(item)
+            elif isinstance(item, dict) and 'tables' in item:
+                for t in item.get('tables', []):
+                    cols = [c['name'] for c in t.get('columns', [])]
+                    for r in t.get('rows', []):
+                        rows.append(dict(zip(cols, r)))
+    if not rows:
+        print('NO_DATA')
+        sys.exit(0)
+    for r in rows:
+        ts = str(r.get('TimeGenerated', '')).replace('T', ' ').split('.')[0]
+        detail = str(r.get('Detail', ''))
+        print(f'  {ts}  {detail}')
+except Exception as e:
+    print(f'PARSE_ERROR: {e}')
 " 2>/dev/null)
 
-    if [[ "${hit_count:-0}" -gt 0 ]]; then
-        echo -e "  ${Red}[ISSUE] Daily cap has been hit ${hit_count} time(s) in the last 7 days.${NC}" | tee -a "$az_log"
-        echo -e "          Data ingested after the cap resets is dropped until the next reset window." | tee -a "$az_log"
-        echo -e "          Intermittent data loss throughout the day is a common symptom of this." | tee -a "$az_log"
-        ANALYSIS_FINDINGS+=("Daily cap hit ${hit_count} time(s) in the last 7 days. Data is being dropped once the cap is reached each day. The workspace daily cap must be raised or removed to restore continuous collection.")
-    else
+    if [[ "$cap_output" == "NO_DATA" ]]; then
         echo -e "  ${Green}[OK] Daily ingestion cap has not been triggered in the last 7 days.${NC}" | tee -a "$az_log"
         echo -e "       Data ingestion has not been interrupted by a workspace cap limit." | tee -a "$az_log"
+    elif [[ "$cap_output" == PARSE_ERROR* ]]; then
+        echo -e "  ${Yellow}[WARN] Daily cap query returned data but could not be parsed. Raw result saved to ${az_log}.${NC}" | tee -a "$az_log"
+        echo "$cap_result" >> "$az_log"
+    else
+        echo -e "  ${Red}[ISSUE] Daily ingestion cap was triggered in the last 7 days:${NC}" | tee -a "$az_log"
+        echo -e "$cap_output" | tee -a "$az_log"
+        echo -e "          Data is dropped once the cap is hit each day until the next UTC midnight reset." | tee -a "$az_log"
+        echo -e "          -> Raise or remove the daily cap: Azure Portal > Log Analytics workspace >" | tee -a "$az_log"
+        echo -e "             Usage and estimated costs > Daily cap.${NC}" | tee -a "$az_log"
+        ANALYSIS_FINDINGS+=("Daily ingestion cap triggered in the last 7 days. Data is dropped once the cap is hit each day. Raise or remove the daily cap in the workspace Usage and estimated costs settings.")
     fi
 }
 
@@ -1102,6 +1141,7 @@ _check_workspace_tables() {
     local table_output
     table_output=$(echo "$result" | python3 -c "
 import sys, json
+from datetime import datetime, timezone
 try:
     data = json.load(sys.stdin)
     rows = []
@@ -1119,11 +1159,24 @@ try:
         sys.exit(0)
     print(f'  {\"Table\":<35} {\"Rows\":>8}  Last Ingest')
     print('  ' + '-' * 65)
+    last_times = []
     for r in rows:
         table = r.get('Type', '')
         count = r.get('Rows', r.get('count_', 0))
         last  = str(r.get('LastIngest', r.get('max_TimeGenerated', ''))).replace('T', ' ').split('.')[0]
         print(f'  {table:<35} {str(count):>8}  {last}')
+        try:
+            last_times.append(datetime.strptime(last, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc))
+        except:
+            pass
+    # Emit a machine-readable stale-cutoff marker if all tables stopped at roughly the
+    # same time more than 15 minutes ago — a strong indicator of a daily cap event.
+    if len(last_times) >= 2:
+        most_recent = max(last_times)
+        spread = (most_recent - min(last_times)).total_seconds()
+        gap = (datetime.now(timezone.utc) - most_recent).total_seconds()
+        if gap > 900 and spread < 120:
+            print(f'STALE_CUTOFF {most_recent.strftime(\"%Y-%m-%d %H:%M:%S\")} {int(gap // 60)}')
 except Exception as e:
     print(f'PARSE_ERROR: {e}')
 " 2>/dev/null)
@@ -1136,7 +1189,18 @@ except Exception as e:
     elif [[ "$table_output" == PARSE_ERROR* ]]; then
         echo -e "  ${Yellow}[WARN] Could not parse table activity results.${NC}" | tee -a "$az_log"
     else
-        echo "$table_output" | tee -a "$az_log"
+        local stale_line display_output
+        stale_line=$(echo "$table_output" | grep "^STALE_CUTOFF" || true)
+        display_output=$(echo "$table_output" | grep -v "^STALE_CUTOFF")
+        echo "$display_output" | tee -a "$az_log"
+        if [[ -n "$stale_line" ]]; then
+            local cutoff_time cutoff_mins
+            cutoff_time=$(echo "$stale_line" | awk '{print $2, $3}')
+            cutoff_mins=$(echo "$stale_line" | awk '{print $4}')
+            echo -e "  ${Yellow}[WARN] All tables stopped ingesting at the same time (~${cutoff_time} UTC, ${cutoff_mins} min ago)." | tee -a "$az_log"
+            echo -e "         A simultaneous cutoff across all tables is a strong indicator of a daily ingestion cap or networking change." | tee -a "$az_log"
+            echo -e "         Cross-reference with the Daily Ingestion Cap Check or network connectivity checks.${NC}" | tee -a "$az_log"
+        fi
     fi
 }
 
@@ -1285,8 +1349,11 @@ for a in json.load(sys.stdin):
         return
     fi
 
-    local dce_name
-    dce_name=$(az monitor data-collection endpoint show --ids "$dce_id" --query "name" -o tsv 2>/dev/null)
+    local dce_json
+    dce_json=$(az monitor data-collection endpoint show --ids "$dce_id" -o json 2>/dev/null)
+    local dce_name dce_public_access
+    dce_name=$(echo "$dce_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('name',''))" 2>/dev/null)
+    dce_public_access=$(echo "$dce_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('publicNetworkAccess',''))" 2>/dev/null)
     echo -e "  DCE found (via ${dce_source}): ${dce_name:-$dce_id}" | tee -a "$az_log"
 
     # ── Step 2: Verify the DCE is in an AMPLS scope ───────────────────────────
@@ -1324,9 +1391,19 @@ for s in json.load(sys.stdin):
         echo -e "       The agent can reach configuration endpoints over the private link." | tee -a "$az_log"
     else
         echo -e "  ${Red}[ISSUE] DCE '${dce_name:-$dce_id}' is NOT a connected resource in any AMPLS scope in this subscription.${NC}" | tee -a "$az_log"
-        echo -e "          The agent cannot fetch its DCR configuration over the private link." | tee -a "$az_log"
+        if [[ "$dce_public_access" == "Disabled" ]]; then
+            echo -e "          publicNetworkAccess=Disabled — config refresh will fail once the cached" | tee -a "$az_log"
+            echo -e "          configuration expires. The agent will stop collecting data." | tee -a "$az_log"
+        else
+            echo -e "          Config is currently fetched over the public internet (publicNetworkAccess=Enabled)." | tee -a "$az_log"
+            echo -e "          This will break if public access is later disabled on the DCE." | tee -a "$az_log"
+        fi
         echo -e "          -> Add '${dce_name:-$dce_id}' as a scoped resource in the AMPLS scope covering this cluster.${NC}" | tee -a "$az_log"
-        ANALYSIS_FINDINGS+=("AMPLS: DCE '${dce_name:-$dce_id}' is not a connected resource in any AMPLS scope. Add it as a scoped resource so the agent can fetch configuration over the private link.")
+        if [[ "$dce_public_access" == "Disabled" ]]; then
+            ANALYSIS_FINDINGS+=("AMPLS: DCE '${dce_name:-$dce_id}' is not in any AMPLS scope and has publicNetworkAccess=Disabled — config refresh will fail when the cache expires. Add it as a scoped resource immediately.")
+        else
+            ANALYSIS_FINDINGS+=("AMPLS: DCE '${dce_name:-$dce_id}' is not a connected resource in any AMPLS scope. Config delivery is going over public internet. Add it as a scoped resource so the agent can fetch configuration over the private link.")
+        fi
     fi
 }
 
