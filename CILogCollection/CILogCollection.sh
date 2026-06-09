@@ -225,7 +225,7 @@ ds_logCollection() {
         local chunk_count
         chunk_count=$(kubectl exec "${ds_pod}" -n kube-system -c ama-logs \
             -- ls /etc/mdsd.d/config-cache/configchunks/ 2>/dev/null | grep -c '.json' || echo 0)
-        if [[ "$chunk_count" -eq 0 ]]; then
+        if [[ "$chunk_count" -eq "0" ]]; then
             echo -e "${Red}[ISSUE] DCR configuration files (configchunks) are missing on ${ds_pod}." | tee -a Tool.log
             echo -e "        The agent has NOT received its Data Collection Rule (DCR) — the instructions from" | tee -a Tool.log
             echo -e "        Azure that tell it what to collect. Without this, no data will be collected at all." | tee -a Tool.log
