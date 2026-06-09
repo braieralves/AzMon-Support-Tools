@@ -343,7 +343,8 @@ rs_logCollection() {
         local chunk_count
         chunk_count=$(kubectl exec "${rs_pod}" -n kube-system -c ama-logs \
             -- ls /etc/mdsd.d/config-cache/configchunks/ 2>/dev/null | grep -c '.json' || echo 0)
-        if [[ "$chunk_count" -eq 0 ]]; then
+        ### error "/etc/mdsd.d/./CILogCollection.sh: line 346: [[: 00: syntax error in expression (error token is "0")" #####
+        if [[ "$chunk_count" -eq "0" ]]; then
             echo -e "${Red}[ISSUE] DCR configchunks directory is empty on RS pod ${rs_pod}.${NC}" | tee -a Tool.log
             ANALYSIS_FINDINGS+=("CRITICAL: DCR configchunks empty on RS pod ${rs_pod}. Agent has not received DCR config.")
         else
