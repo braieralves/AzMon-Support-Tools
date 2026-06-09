@@ -130,7 +130,7 @@ derive_cluster_info() {
     if [[ -z "$WORKSPACE_ID" ]]; then
         # Attempt 1: environment variable inside the DS pod
         if [[ -n "$ds_pod" ]]; then
-            WORKSPACE_ID=$(kubectl exec "${ds_pod}" -n kube-system -c ama-logs -- env 2>/dev/null \
+            WORKSPACE_ID=$(kubectl exec -it "${ds_pod}" -n kube-system -c ama-logs -- env 2>/dev/null \
                 | grep -iE "^WSID=|^WORKSPACE_ID=" | head -1 | cut -d= -f2)
         fi
 
@@ -166,7 +166,7 @@ derive_cluster_info() {
         if [[ -n "$test_pod" ]]; then
             local ods_host="${WORKSPACE_ID}.ods.opinsights.azure.com"
             local resolved_ip
-            resolved_ip=$(kubectl exec "${test_pod}" -n kube-system -c ama-logs -- \
+            resolved_ip=$(kubectl exec -it "${test_pod}" -n kube-system -c ama-logs -- \
                 nslookup "$ods_host" 2>/dev/null | grep "Address" | tail -1 | awk '{print $2}')
 
             if [[ -n "$resolved_ip" ]] && \
@@ -191,10 +191,10 @@ ds_logCollection() {
         echo -e "         Restarts often indicate crashes due to resource limits (OOMKill), configuration errors," | tee -a Tool.log
         echo -e "         or a failing dependency. Review ama-logs-daemonset/logs_${ds_pod}_previous.txt to see what caused the restart.${NC}" | tee -a Tool.log
     fi
-    kubectl exec "${ds_pod}" -n kube-system -c ama-logs --request-timeout=10m -- ps -ef > "ama-logs-daemonset/process_${ds_pod}.txt" 2>/dev/null
+    kubectl exec -it "${ds_pod}" -n kube-system -c ama-logs --request-timeout=10m -- ps -ef > "ama-logs-daemonset/process_${ds_pod}.txt" 2>/dev/null
 
     local check
-    check=$(kubectl exec "${ds_pod}" -n kube-system -c ama-logs -- ls /var/opt/microsoft 2>&1)
+    check=$(kubectl exec -it "${ds_pod}" -n kube-system -c ama-logs -- ls /var/opt/microsoft 2>&1)
     if [[ $check == *"cannot access"* ]] || [[ $check == *"No such file"* ]]; then
         echo -e "${Red}[ERROR] /var/opt/microsoft not found on ${ds_pod}." | tee -a Tool.log
         echo -e "        The agent may not have initialized correctly." | tee -a Tool.log
@@ -223,9 +223,9 @@ ds_logCollection() {
 
         # A missing or empty configchunks dir means the agent has not received its DCR config.
         local chunk_count
-        chunk_count=$(kubectl exec "${ds_pod}" -n kube-system -c ama-logs \
+        chunk_count=$(kubectl exec -it "${ds_pod}" -n kube-system -c ama-logs \
             -- ls /etc/mdsd.d/config-cache/configchunks/ 2>/dev/null | grep -c '.json' || echo 0)
-        if [[ "$chunk_count" -eq "0" ]]; then
+        if [[ "$chunk_count" -eq 0 ]]; then
             echo -e "${Red}[ISSUE] DCR configuration files (configchunks) are missing on ${ds_pod}." | tee -a Tool.log
             echo -e "        The agent has NOT received its Data Collection Rule (DCR) — the instructions from" | tee -a Tool.log
             echo -e "        Azure that tell it what to collect. Without this, no data will be collected at all." | tee -a Tool.log
@@ -239,17 +239,17 @@ ds_logCollection() {
         fi
     fi
 
-    kubectl exec "${ds_pod}" --namespace=kube-system -c ama-logs -- \
+    kubectl exec -it "${ds_pod}" --namespace=kube-system -c ama-logs -- \
         ls /var/opt/microsoft/docker-cimprov/state/ContainerInventory > "ama-logs-daemonset/containerID_${ds_pod}.txt" 2>&1
 
-    check=$(kubectl exec "${ds_pod}" -n kube-system -c ama-logs -- ls /etc/fluent 2>&1)
+    check=$(kubectl exec -it "${ds_pod}" -n kube-system -c ama-logs -- ls /etc/fluent 2>&1)
     if [[ $check != *"cannot access"* ]] && [[ $check != *"No such file"* ]]; then
         echo -e "    /etc/fluent/container.conf"
         kubectl cp "${ds_pod}:/etc/fluent/container.conf" "ama-logs-daemonset/container_${ds_pod}.conf"      --namespace=kube-system --container ama-logs > /dev/null 2>&1
         kubectl cp "${ds_pod}:/etc/fluent/container.conf" "ama-logs-prom-daemonset/container_${ds_pod}.conf" --namespace=kube-system --container ama-logs-prometheus > /dev/null 2>&1
     fi
 
-    check=$(kubectl exec "${ds_pod}" -n kube-system -c ama-logs -- ls /etc/opt/microsoft/docker-cimprov 2>&1)
+    check=$(kubectl exec -it "${ds_pod}" -n kube-system -c ama-logs -- ls /etc/opt/microsoft/docker-cimprov 2>&1)
     if [[ $check != *"cannot access"* ]] && [[ $check != *"No such file"* ]]; then
         echo -e "    /etc/opt/microsoft/docker-cimprov/fluent-bit.conf"
         echo -e "    /etc/opt/microsoft/docker-cimprov/telegraf.conf"
@@ -259,7 +259,7 @@ ds_logCollection() {
         kubectl cp "${ds_pod}:/etc/opt/microsoft/docker-cimprov/telegraf.conf"   ama-logs-prom-daemonset/telegraf.conf    --namespace=kube-system --container ama-logs-prometheus > /dev/null 2>&1
     fi
 
-    check=$(kubectl exec "${ds_pod}" -n kube-system -c ama-logs -- ls /etc/config/settings 2>&1)
+    check=$(kubectl exec -it "${ds_pod}" -n kube-system -c ama-logs -- ls /etc/config/settings 2>&1)
     if [[ $check != *"cannot access"* ]] && [[ $check != *"No such file"* ]]; then
         echo -e "    /etc/config/settings"
         echo -e "      custom prometheus/metrics settings applied from ConfigMap"
@@ -275,10 +275,10 @@ win_logCollection() {
     mkdir -p ama-logs-windows-daemonset
     kubectl describe pod "${ds_win_pod}" --namespace=kube-system > "ama-logs-windows-daemonset/describe_${ds_win_pod}.txt" 2>&1
     kubectl logs "${ds_win_pod}" --container ama-logs-windows --namespace=kube-system > "ama-logs-windows-daemonset/logs_${ds_win_pod}.txt" 2>&1
-    kubectl exec "${ds_win_pod}" -n kube-system --request-timeout=10m -- powershell Get-Process > "ama-logs-windows-daemonset/process_${ds_win_pod}.txt" 2>/dev/null
+    kubectl exec -it "${ds_win_pod}" -n kube-system --request-timeout=10m -- powershell Get-Process > "ama-logs-windows-daemonset/process_${ds_win_pod}.txt" 2>/dev/null
 
     local check
-    check=$(kubectl exec "${ds_win_pod}" -n kube-system -- powershell ls /etc 2>&1)
+    check=$(kubectl exec -it "${ds_win_pod}" -n kube-system -- powershell ls /etc 2>&1)
     if [[ $check == *"cannot access"* ]] || [[ $check == *"No such file"* ]]; then
         echo -e "${Red}[ERROR] /etc/ not found on Windows pod ${ds_win_pod}.${NC}" | tee -a Tool.log
         return
@@ -300,7 +300,7 @@ win_logCollection() {
         out_oms.conf
     )
     for logfile in "${win_logs[@]}"; do
-        kubectl exec "${ds_win_pod}" -n kube-system --request-timeout=10m -- \
+        kubectl exec -it "${ds_win_pod}" -n kube-system --request-timeout=10m -- \
             powershell cat "/etc/amalogswindows/${logfile}" > "ama-logs-windows-daemonset/${logfile}" 2>/dev/null
     done
 
@@ -318,10 +318,10 @@ rs_logCollection() {
         echo -e "         Restarts often indicate crashes due to resource limits (OOMKill), configuration errors," | tee -a Tool.log
         echo -e "         or a failing dependency. Review ama-logs-replicaset/logs_${rs_pod}_previous.txt to see what caused the restart.${NC}" | tee -a Tool.log
     fi
-    kubectl exec "${rs_pod}" -n kube-system -c ama-logs --request-timeout=10m -- ps -ef > "ama-logs-replicaset/process_${rs_pod}.txt" 2>/dev/null
+    kubectl exec -it "${rs_pod}" -n kube-system -c ama-logs --request-timeout=10m -- ps -ef > "ama-logs-replicaset/process_${rs_pod}.txt" 2>/dev/null
 
     local check
-    check=$(kubectl exec "${rs_pod}" -n kube-system -c ama-logs -- ls /var/opt/microsoft 2>&1)
+    check=$(kubectl exec -it "${rs_pod}" -n kube-system -c ama-logs -- ls /var/opt/microsoft 2>&1)
     if [[ $check == *"cannot access"* ]] || [[ $check == *"No such file"* ]]; then
         echo -e "${Red}[ERROR] /var/opt/microsoft not found on ${rs_pod}." | tee -a Tool.log
         echo -e "        The RS agent may not have initialized correctly.${NC}" | tee -a Tool.log
@@ -341,10 +341,10 @@ rs_logCollection() {
         kubectl cp "${rs_pod}:/etc/mdsd.d/" ama-logs-replicaset-mdsd-config --namespace=kube-system --container ama-logs > /dev/null 2>&1
 
         local chunk_count
-        chunk_count=$(kubectl exec "${rs_pod}" -n kube-system -c ama-logs \
+        chunk_count=$(kubectl exec -it "${rs_pod}" -n kube-system -c ama-logs \
             -- ls /etc/mdsd.d/config-cache/configchunks/ 2>/dev/null | grep -c '.json' || echo 0)
         ### error "/etc/mdsd.d/./CILogCollection.sh: line 346: [[: 00: syntax error in expression (error token is "0")" #####
-        if [[ "$chunk_count" -eq "0" ]]; then
+        if [[ "$chunk_count" -eq 0 ]]; then
             echo -e "${Red}[ISSUE] DCR configchunks directory is empty on RS pod ${rs_pod}.${NC}" | tee -a Tool.log
             ANALYSIS_FINDINGS+=("CRITICAL: DCR configchunks empty on RS pod ${rs_pod}. Agent has not received DCR config.")
         else
@@ -352,14 +352,14 @@ rs_logCollection() {
         fi
     fi
 
-    check=$(kubectl exec "${rs_pod}" -n kube-system -c ama-logs -- ls /etc/fluent 2>&1)
+    check=$(kubectl exec -it "${rs_pod}" -n kube-system -c ama-logs -- ls /etc/fluent 2>&1)
     if [[ $check != *"cannot access"* ]] && [[ $check != *"No such file"* ]]; then
         echo -e "    /etc/fluent/kube.conf"
         kubectl cp "${rs_pod}:/etc/fluent/kube.conf" "ama-logs-replicaset/kube_${rs_pod}.conf" \
             --namespace=kube-system --container ama-logs > /dev/null 2>&1
     fi
 
-    check=$(kubectl exec "${rs_pod}" -n kube-system -c ama-logs -- ls /etc/opt/microsoft/docker-cimprov 2>&1)
+    check=$(kubectl exec -it "${rs_pod}" -n kube-system -c ama-logs -- ls /etc/opt/microsoft/docker-cimprov 2>&1)
     if [[ $check != *"cannot access"* ]] && [[ $check != *"No such file"* ]]; then
         echo -e "    /etc/opt/microsoft/docker-cimprov/fluent-bit-rs.conf"
         echo -e "    /etc/opt/microsoft/docker-cimprov/telegraf-rs.conf"
@@ -470,8 +470,8 @@ network_connectivity_check() {
 
     # Check which tools are available inside the pod
     local has_curl has_nslookup
-    has_curl=$(kubectl exec "${test_pod}"    -n kube-system -c ama-logs -- which curl     2>/dev/null)
-    has_nslookup=$(kubectl exec "${test_pod}" -n kube-system -c ama-logs -- which nslookup 2>/dev/null)
+    has_curl=$(kubectl exec -it "${test_pod}"    -n kube-system -c ama-logs -- which curl     2>/dev/null)
+    has_nslookup=$(kubectl exec -it "${test_pod}" -n kube-system -c ama-logs -- which nslookup 2>/dev/null)
 
     # Build the endpoint list based on what info we have
     local -a endpoints=()
@@ -532,7 +532,7 @@ network_connectivity_check() {
         echo -e "\n${Bold}DNS Resolution (nslookup):${NC}" | tee -a "$net_log"
         for ep in "${endpoints[@]}"; do
             local ns_result
-            ns_result=$(kubectl exec "${test_pod}" -n kube-system -c ama-logs -- nslookup "$ep" 2>&1)
+            ns_result=$(kubectl exec -it "${test_pod}" -n kube-system -c ama-logs -- nslookup "$ep" 2>&1)
 
             if echo "$ns_result" | grep -qE "NXDOMAIN|can't find|server can't find|No address"; then
                 echo -e "  ${Red}[FAIL] ${ep}${NC}" | tee -a "$net_log"
@@ -567,7 +567,7 @@ network_connectivity_check() {
         echo -e "\n${Bold}HTTPS Connectivity (curl):${NC}" | tee -a "$net_log"
         for ep in "${endpoints[@]}"; do
             local http_code
-            http_code=$(kubectl exec "${test_pod}" -n kube-system -c ama-logs -- \
+            http_code=$(kubectl exec -it "${test_pod}" -n kube-system -c ama-logs -- \
                 curl -s -o /dev/null -w "%{http_code}" \
                 --connect-timeout 15 --max-time 20 \
                 "https://${ep}:443" 2>/dev/null)
@@ -593,7 +593,7 @@ network_connectivity_check() {
 
     # ── SSL inspection hint ───────────────────────────────────────────────────
     echo -e "\n${Cyan}SSL Inspection Check (run manually if data is missing despite passing tests above):" | tee -a "$net_log"
-    echo -e "  kubectl exec -it ${test_pod} -n kube-system -c ama-logs -- /bin/bash" | tee -a "$net_log"
+    echo -e "  kubectl exec -it -it ${test_pod} -n kube-system -c ama-logs -- /bin/bash" | tee -a "$net_log"
     echo -e "  openssl s_client -connect global.handler.control.monitor.azure.com:443 -showcerts 2>&1 | grep -E 'issuer|subject'" | tee -a "$net_log"
     echo -e "  Expected: certificate issued by Microsoft/DigiCert." | tee -a "$net_log"
     echo -e "  If a third-party CA appears: SSL inspection is intercepting agent traffic and must be" | tee -a "$net_log"
