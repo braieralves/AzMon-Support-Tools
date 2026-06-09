@@ -1483,7 +1483,7 @@ azure_config_check() {
 
     local addon_enabled use_aad_auth
     addon_enabled=$(az aks show --resource-group "$cluster_rg" --name "$cluster_name" \
-        --query "addonProfiles.omsAgent.enabled" -o tsv 2>/dev/null)
+        --query "addonProfiles.omsagent.enabled" -o tsv 2>/dev/null)
     use_aad_auth=$(az aks show --resource-group "$cluster_rg" --name "$cluster_name" \
         --query "addonProfiles.omsAgent.config.useAADAuth" -o tsv 2>/dev/null)
 
