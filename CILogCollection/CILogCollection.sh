@@ -684,6 +684,9 @@ analyze_collected_logs() {
         if scan_log "$mdsd_err" "$mdsd_err" \
             "connection refused|failed to connect|network unreachable|NXDOMAIN|could not resolve|timed out|connection reset" \
             "Network connectivity errors detected." \
+            "Could not obtain configuration from" \
+            "Failed from MCS path" \
+            "Fallback Mcs endpoint to" \
             "Run network connectivity tests or check firewall rules for Azure Monitor endpoints. Review the network-connectivity.log in this archive."; then
             found_any=true
         elif scan_log "$mdsd_err" "$mdsd_err" \
