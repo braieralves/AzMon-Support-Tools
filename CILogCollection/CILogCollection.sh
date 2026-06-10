@@ -679,37 +679,38 @@ analyze_collected_logs() {
     local found_any=false
 
     # ── mdsd.err ─────────────────────────────────────────────────────────────
-    for mdsd_err in ama-logs-daemonset-mdsd/mdsd.err ama-logs-replicaset-mdsd/mdsd.err; do
-        [[ ! -f "$mdsd_err" ]] && continue
-        echo -e "\nChecking ${mdsd_err} for network, auth, and TLS errors..." | tee -a "$analysis_log"
+scan_log() {
+    local file="$1"
+    local label="$2"
+    local pattern="$3"
+    local message="$4"
+    local extra_msg1="${5:-}"
+    local extra_msg2="${6:-}"
+    local extra_msg3="${7:-}"
 
-        if scan_log "$mdsd_err" "$mdsd_err" \
-            "connection refused|failed to connect|network unreachable|NXDOMAIN|could not resolve|timed out|connection reset" \
-            "Network connectivity errors detected." \
-            "Could not obtain configuration from" \
-            "Failed from MCS path" \
-            "Fallback Mcs endpoint to" \
-            "Run network connectivity tests or check firewall rules for Azure Monitor endpoints. Review the network-connectivity.log in this archive."; then
-            found_any=true
-        elif scan_log "$mdsd_err" "$mdsd_err" \
-            "Data collection endpoint must be used to access configuration over private link" \
-            "AMPLS private link 403: DCE is not a connected resource in the AMPLS scope." \
-            "Add the DCE as a scoped resource in the AMPLS scope so the agent can fetch its DCR configuration over the private link. Review the azure-config-check.log DCE section."; then
-            found_any=true
-        elif scan_log "$mdsd_err" "$mdsd_err" \
-            "403|InvalidAccess|Unauthorized|Authentication failed|forbidden|Access denied" \
-            "Authentication/authorization errors (403) detected." \
-            "If AMPLS is in use, verify the workspace and DCE are connected resources in the AMPLS scope. Check that the cluster managed identity exists and the DCR association is valid."; then
-            found_any=true
-        elif scan_log "$mdsd_err" "$mdsd_err" \
-            "certificate|SSL|TLS|cert verify|x509" \
-            "TLS/certificate errors detected." \
-            "SSL inspection may be intercepting Azure Monitor traffic. Run: openssl s_client -connect <endpoint>:443 -showcerts and verify the certificate is issued by Microsoft/DigiCert."; then
-            found_any=true
-        else
-            echo -e "  ${Green}[OK] No critical errors in mdsd — the agent's core engine is operating normally.${NC}" | tee -a "$analysis_log"
-        fi
-    done
+    # Extract matches (case-insensitive, extended regex)
+    local matches
+    matches=$(grep -Ein "$pattern" "$file" 2>/dev/null)
+
+    # If matches found
+    if [[ -n "$matches" ]]; then
+        echo -e "  ${Red}[ERROR] $message${NC}" | tee -a "$analysis_log"
+        echo -e "  File: $file" | tee -a "$analysis_log"
+        echo -e "  Matches (line:number:text):" | tee -a "$analysis_log"
+
+        # Print matching lines
+        echo "$matches" | tee -a "$analysis_log"
+
+        # Optional guidance messages
+        [[ -n "$extra_msg1" ]] && echo -e "  → $extra_msg1" | tee -a "$analysis_log"
+        [[ -n "$extra_msg2" ]] && echo -e "  → $extra_msg2" | tee -a "$analysis_log"
+        [[ -n "$extra_msg3" ]] && echo -e "  → $extra_msg3" | tee -a "$analysis_log"
+
+        return 0
+    fi
+
+    return 1
+}
 
     # ── mdsd.warn ────────────────────────────────────────────────────────────
     for mdsd_warn in ama-logs-daemonset-mdsd/mdsd.warn ama-logs-replicaset-mdsd/mdsd.warn; do
