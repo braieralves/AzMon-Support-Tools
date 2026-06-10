@@ -565,9 +565,10 @@ network_connectivity_check() {
     # ── HTTPS connectivity tests ──────────────────────────────────────────────
     if [[ -n "$has_curl" ]]; then
         echo -e "\n${Bold}HTTPS Connectivity (curl):${NC}" | tee -a "$net_log"
+        echo -e "  ${Cyan}Note: Any HTTP response (including 4xx) means the endpoint was reached — auth errors are expected on root paths${NC}" | tee -a "$net_log"
         for ep in "${endpoints[@]}"; do
             local http_code
-            http_code=$(kubectl exec -it "${test_pod}" -n kube-system -c ama-logs -- \
+            http_code=$(kubectl exec "${test_pod}" -n kube-system -c ama-logs -- \
                 curl -s -o /dev/null -w "%{http_code}" \
                 --connect-timeout 15 --max-time 20 \
                 "https://${ep}:443" 2>/dev/null)
@@ -590,6 +591,7 @@ network_connectivity_check() {
     else
         echo -e "  ${Yellow}[SKIP] curl not found in the agent pod - HTTPS connectivity tests skipped.${NC}" | tee -a "$net_log"
     fi
+
 
     # ── SSL inspection hint ───────────────────────────────────────────────────
     echo -e "\n${Cyan}SSL Inspection Check (run manually if data is missing despite passing tests above):" | tee -a "$net_log"
